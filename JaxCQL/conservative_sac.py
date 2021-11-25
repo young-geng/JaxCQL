@@ -176,10 +176,6 @@ class ConservativeSAC(object):
                 cql_next_actions, cql_next_log_pis = self.policy.apply(
                     train_params['policy'], split_rng, next_observations, repeat=self.config.cql_n_actions
                 )
-                # cql_current_actions = jax.lax.stop_gradient(cql_current_actions)
-                # cql_current_log_pis = jax.lax.stop_gradient(cql_current_log_pis)
-                # cql_next_actions = jax.lax.stop_gradient(cql_next_actions)
-                # cql_next_log_pis = jax.lax.stop_gradient(cql_next_log_pis)
 
                 cql_q1_rand = self.qf.apply(train_params['qf1'], observations, cql_random_actions)
                 cql_q2_rand = self.qf.apply(train_params['qf2'], observations, cql_random_actions)
