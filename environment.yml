@@ -1,0 +1,35 @@
+name: JaxCQL
+channels:
+    - https://conda.anaconda.org/conda-forge
+dependencies:
+    - python=3.8
+    - pip
+    - numpy
+    - scipy
+    - numba
+    - h5py
+    - matplotlib
+    - scikit-learn
+    - jupyter
+    - mpi4py
+    - patchelf
+    - jax
+    - pip:
+        - flax
+        - optax
+        - distrax
+        - Cython
+        - scikit-image
+        - tqdm
+        - seaborn
+        - gym
+        - mujoco_py
+        - box2d
+        - absl-py
+        - opencv-python
+        - pygame
+        - gtimer
+        - joblib
+        - git+https://github.com/young-geng/d4rl@master#egg=d4rl
+        - wandb
+        - ml_collections
