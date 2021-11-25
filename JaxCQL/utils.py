@@ -43,9 +43,9 @@ class WandBLogger(object):
     def get_default_config(updates=None):
         config = ConfigDict()
         config.online = False
-        config.prefix = 'SimpleSAC'
+        config.prefix = 'JaxCQL'
         config.project = 'sac'
-        config.output_dir = '/tmp/SimpleSAC'
+        config.output_dir = '/tmp/JaxCQL'
         config.random_delay = 0.0
         config.experiment_id = config_dict.placeholder(str)
         config.anonymous = config_dict.placeholder(str)
