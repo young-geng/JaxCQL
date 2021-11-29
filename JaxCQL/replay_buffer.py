@@ -95,13 +95,6 @@ class ReplayBuffer(object):
         )
 
 
-def batch_to_jax(batch):
-    return {
-        k: jnp.array(v)
-        for k, v in batch.items()
-    }
-
-
 def get_d4rl_dataset(env):
     dataset = d4rl.qlearning_dataset(env)
     return dict(

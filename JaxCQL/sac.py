@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from copy import deepcopy
-import functools
+from functools import partial
 
 from ml_collections import ConfigDict
 
@@ -13,7 +13,7 @@ from flax.training.train_state import TrainState
 import optax
 import distrax
 
-from .jax_utils import jit_method, next_rng, value_and_multi_grad, mse_loss
+from .jax_utils import next_rng, value_and_multi_grad, mse_loss
 from .model import Scalar, update_target_network
 
 
@@ -92,7 +92,7 @@ class SAC(object):
         )
         return {key: val.item() for key, val in metrics.items()}
 
-    @jit_method
+    @partial(jax.jit, static_argnames='self')
     def _train_step(self, train_states, target_qf_params, rng, batch):
         def loss_fn(train_params, rng):
             observations = batch['observations']

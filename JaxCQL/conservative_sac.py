@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from copy import deepcopy
-import functools
+from functools import partial
 
 from ml_collections import ConfigDict
 
@@ -108,7 +108,7 @@ class ConservativeSAC(object):
         )
         return {key: val.item() for key, val in metrics.items()}
 
-    @jit_method
+    @partial(jax.jit, static_argnames='self')
     def _train_step(self, train_states, target_qf_params, rng, batch):
 
         def loss_fn(train_params, rng):

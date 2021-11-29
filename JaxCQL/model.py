@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -118,14 +120,17 @@ class SamplerPolicy(object):
     def __init__(self, policy, params):
         self.policy = policy
         self.params = params
-        self.act = jax.jit(self.policy.apply, static_argnames=('deterministic', 'repeat'))
 
     def update_params(self, params):
         self.params = params
         return self
 
+    @partial(jax.jit, static_argnames=('self', 'deterministic'))
+    def act(self, params, rng, observations, deterministic):
+        return self.policy.apply(params, rng, observations, deterministic, repeat=None)
+
     def __call__(self, observations, deterministic=False):
-        observations = jnp.array(observations)
-        actions, _ = self.act(self.params, next_rng(), observations, deterministic=deterministic, repeat=None)
+        observations = jax.device_put(observations)
+        actions, _ = self.act(self.params, next_rng(), observations, deterministic=deterministic)
         assert jnp.all(jnp.isfinite(actions))
-        return np.array(actions)
+        return jax.device_get(actions)

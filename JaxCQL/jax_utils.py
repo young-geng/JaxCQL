@@ -1,5 +1,3 @@
-import functools
-
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -31,11 +29,6 @@ def extend_and_repeat(tensor, axis, repeat):
 def mse_loss(val, target):
     return jnp.mean(jnp.square(val - target))
 
-
-def jit_method(method):
-    return functools.partial(jax.jit, static_argnums=(0,))(method)
-
-
 def value_and_multi_grad(fun, n_outputs, argnums=0, has_aux=False):
     def select_output(index):
         def wrapped(*args, **kwargs):
@@ -60,3 +53,10 @@ def value_and_multi_grad(fun, n_outputs, argnums=0, has_aux=False):
             grads.append(grad)
         return (tuple(values), *aux), tuple(grads)
     return multi_grad_fn
+
+
+def batch_to_jax(batch):
+    return {
+        k: jax.device_put(v)
+        for k, v in batch.items()
+    }
