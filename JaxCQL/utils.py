@@ -6,7 +6,7 @@ import tempfile
 import os
 from copy import copy
 from socket import gethostname
-import pickle
+import cloudpickle as pickle
 
 import numpy as np
 
