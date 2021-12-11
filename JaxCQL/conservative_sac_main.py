@@ -96,7 +96,6 @@ def main(argv):
 
         with Timer() as eval_timer:
             if epoch == 0 or (epoch + 1) % FLAGS.eval_period == 0:
-                sampler_policy = SamplerPolicy(sac.policy, sac.train_params['policy'])
                 trajs = eval_sampler.sample(
                     sampler_policy.update_params(sac.train_params['policy']),
                     FLAGS.eval_n_trajs, deterministic=True

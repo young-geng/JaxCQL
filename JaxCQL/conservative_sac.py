@@ -13,7 +13,7 @@ from flax.training.train_state import TrainState
 import optax
 import distrax
 
-from .jax_utils import jit_method, next_rng, value_and_multi_grad, mse_loss
+from .jax_utils import next_rng, value_and_multi_grad, mse_loss
 from .model import Scalar, update_target_network
 
 
