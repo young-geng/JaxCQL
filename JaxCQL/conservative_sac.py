@@ -223,7 +223,7 @@ class ConservativeSAC(object):
 
                 if self.config.cql_lagrange:
                     alpha_prime = jnp.clip(
-                        torch.exp(self.log_alpha_prime.apply(train_params['log_alpha_prime'])),
+                        jnp.exp(self.log_alpha_prime.apply(train_params['log_alpha_prime'])),
                         a_min=0.0, a_max=1000000.0
                     )
                     cql_min_qf1_loss = alpha_prime * (cql_min_qf1_loss - self.config.cql_target_action_gap)
