@@ -273,6 +273,8 @@ class ConservativeSAC(object):
                 cql_q2_current_actions=aux_values['cql_q2_current_actions'].mean(),
                 cql_q1_next_actions=aux_values['cql_q1_next_actions'].mean(),
                 cql_q2_next_actions=aux_values['cql_q2_next_actions'].mean(),
+                alpha_prime=aux_values['alpha_prime'],
+                alpha_prime_loss=aux_values['alpha_prime_loss'],
             )
         else:
             cql_metrics = {}
