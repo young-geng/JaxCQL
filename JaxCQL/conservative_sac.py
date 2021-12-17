@@ -15,6 +15,7 @@ import distrax
 
 from .jax_utils import next_rng, value_and_multi_grad, mse_loss
 from .model import Scalar, update_target_network
+from .utils import prefix_metrics
 
 
 class ConservativeSAC(object):
@@ -38,6 +39,7 @@ class ConservativeSAC(object):
         config.cql_target_action_gap = 1.0
         config.cql_temp = 1.0
         config.cql_min_q_weight = 5.0
+        config.cql_max_target_backup = False
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -145,13 +147,25 @@ class ConservativeSAC(object):
             q2_pred = self.qf.apply(train_params['qf2'], observations, actions)
 
             rng, split_rng = jax.random.split(rng)
-            new_next_actions, next_log_pi = self.policy.apply(
-                train_params['policy'], split_rng, next_observations
-            )
-            target_q_values = jnp.minimum(
-                self.qf.apply(target_qf_params['qf1'], next_observations, new_next_actions),
-                self.qf.apply(target_qf_params['qf2'], next_observations, new_next_actions),
-            )
+            if self.config.cql_max_target_backup:
+                new_next_actions, next_log_pi = self.policy.apply(
+                    train_params['policy'], split_rng, next_observations, repeat=self.config.cql_n_actions
+                )
+                target_q_values = jnp.minimum(
+                    self.qf.apply(target_qf_params['qf1'], next_observations, new_next_actions),
+                    self.qf.apply(target_qf_params['qf2'], next_observations, new_next_actions),
+                )
+                max_target_indices = jnp.expand_dims(jnp.argmax(target_q_values, axis=-1), axis=-1)
+                target_q_values = jnp.take_along_axis(target_q_values, max_target_indices, axis=-1)
+                next_log_pi = jnp.take_along_axis(next_log_pi, max_target_indices, axis=-1)
+            else:
+                new_next_actions, next_log_pi = self.policy.apply(
+                    train_params['policy'], split_rng, next_observations
+                )
+                target_q_values = jnp.minimum(
+                    self.qf.apply(target_qf_params['qf1'], next_observations, new_next_actions),
+                    self.qf.apply(target_qf_params['qf2'], next_observations, new_next_actions),
+                )
 
             if self.config.backup_entropy:
                 target_q_values = target_q_values - alpha * next_log_pi
@@ -208,32 +222,34 @@ class ConservativeSAC(object):
                         axis=1
                     )
 
-                cql_min_qf1_loss = (
-                    jax.scipy.special.logsumexp(cql_cat_q1 / self.config.cql_temp, axis=1).mean()
-                    * self.config.cql_min_q_weight * self.config.cql_temp
+                cql_qf1_ood = (
+                    jax.scipy.special.logsumexp(cql_cat_q1 / self.config.cql_temp, axis=1)
+                    * self.config.cql_temp
                 )
-                cql_min_qf2_loss = (
-                    jax.scipy.special.logsumexp(cql_cat_q2 / self.config.cql_temp, axis=1).mean()
-                    * self.config.cql_min_q_weight * self.config.cql_temp
+                cql_qf2_ood = (
+                    jax.scipy.special.logsumexp(cql_cat_q2 / self.config.cql_temp, axis=1)
+                    * self.config.cql_temp
                 )
 
                 """Subtract the log likelihood of data"""
-                cql_min_qf1_loss = cql_min_qf1_loss - q1_pred.mean() * self.config.cql_min_q_weight
-                cql_min_qf2_loss = cql_min_qf2_loss - q2_pred.mean() * self.config.cql_min_q_weight
+                cql_qf1_diff = (cql_qf1_ood - q1_pred).mean()
+                cql_qf2_diff = (cql_qf2_ood - q2_pred).mean()
 
                 if self.config.cql_lagrange:
                     alpha_prime = jnp.clip(
                         jnp.exp(self.log_alpha_prime.apply(train_params['log_alpha_prime'])),
                         a_min=0.0, a_max=1000000.0
                     )
-                    cql_min_qf1_loss = alpha_prime * (cql_min_qf1_loss - self.config.cql_target_action_gap)
-                    cql_min_qf2_loss = alpha_prime * (cql_min_qf2_loss - self.config.cql_target_action_gap)
+                    cql_min_qf1_loss = alpha_prime * (cql_qf1_diff - self.config.cql_target_action_gap)
+                    cql_min_qf2_loss = alpha_prime * (cql_qf2_diff - self.config.cql_target_action_gap)
 
                     alpha_prime_loss = (-cql_min_qf1_loss - cql_min_qf2_loss)*0.5
 
                     loss_collection['log_alpha_prime'] = alpha_prime_loss
 
                 else:
+                    cql_min_qf1_loss = cql_qf1_diff * self.config.cql_min_q_weight
+                    cql_min_qf2_loss = cql_qf2_diff * self.config.cql_min_q_weight
                     alpha_prime_loss = 0.0
                     alpha_prime = 0.0
 
@@ -261,24 +277,6 @@ class ConservativeSAC(object):
             self.config.soft_target_update_rate
         )
 
-        if self.config.use_cql:
-            cql_metrics = dict(
-                cql_std_q1=aux_values['cql_std_q1'].mean(),
-                cql_std_q2=aux_values['cql_std_q2'].mean(),
-                cql_q1_rand=aux_values['cql_q1_rand'].mean(),
-                cql_q2_rand=aux_values['cql_q2_rand'].mean(),
-                cql_min_qf1_loss=aux_values['cql_min_qf1_loss'].mean(),
-                cql_min_qf2_loss=aux_values['cql_min_qf2_loss'].mean(),
-                cql_q1_current_actions=aux_values['cql_q1_current_actions'].mean(),
-                cql_q2_current_actions=aux_values['cql_q2_current_actions'].mean(),
-                cql_q1_next_actions=aux_values['cql_q1_next_actions'].mean(),
-                cql_q2_next_actions=aux_values['cql_q2_next_actions'].mean(),
-                alpha_prime=aux_values['alpha_prime'],
-                alpha_prime_loss=aux_values['alpha_prime_loss'],
-            )
-        else:
-            cql_metrics = {}
-
         metrics = dict(
             log_pi=aux_values['log_pi'].mean(),
             policy_loss=aux_values['policy_loss'],
@@ -290,7 +288,25 @@ class ConservativeSAC(object):
             average_qf2=aux_values['q2_pred'].mean(),
             average_target_q=aux_values['target_q_values'].mean(),
         )
-        metrics.update(cql_metrics)
+
+        if self.config.use_cql:
+            metrics.update(prefix_metrics(dict(
+                cql_std_q1=aux_values['cql_std_q1'].mean(),
+                cql_std_q2=aux_values['cql_std_q2'].mean(),
+                cql_q1_rand=aux_values['cql_q1_rand'].mean(),
+                cql_q2_rand=aux_values['cql_q2_rand'].mean(),
+                cql_qf1_diff=aux_values['cql_qf1_diff'].mean(),
+                cql_qf2_diff=aux_values['cql_qf2_diff'].mean(),
+                cql_min_qf1_loss=aux_values['cql_min_qf1_loss'].mean(),
+                cql_min_qf2_loss=aux_values['cql_min_qf2_loss'].mean(),
+                cql_q1_current_actions=aux_values['cql_q1_current_actions'].mean(),
+                cql_q2_current_actions=aux_values['cql_q2_current_actions'].mean(),
+                cql_q1_next_actions=aux_values['cql_q1_next_actions'].mean(),
+                cql_q2_next_actions=aux_values['cql_q2_next_actions'].mean(),
+                alpha_prime=aux_values['alpha_prime'],
+                alpha_prime_loss=aux_values['alpha_prime_loss'],
+            ), 'cql'))
+
         return new_train_states, new_target_qf_params, metrics
 
     @property
