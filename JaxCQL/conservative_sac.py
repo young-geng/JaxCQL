@@ -180,7 +180,10 @@ class ConservativeSAC(object):
             if self.config.use_cql:
                 batch_size = actions.shape[0]
                 rng, split_rng = jax.random.split(rng)
-                cql_random_actions = jax.random.uniform(split_rng, shape=(batch_size, self.config.cql_n_actions, self.action_dim))
+                cql_random_actions = jax.random.uniform(
+                    split_rng, shape=(batch_size, self.config.cql_n_actions, self.action_dim),
+                    minval=-1.0, maxval=1.0
+                )
 
                 rng, split_rng = jax.random.split(rng)
                 cql_current_actions, cql_current_log_pis = self.policy.apply(
