@@ -108,7 +108,7 @@ class ConservativeSAC(object):
         self._train_states, self._target_qf_params, metrics = self._train_step(
             self._train_states, self._target_qf_params, next_rng(), batch
         )
-        return {key: val.item() for key, val in metrics.items()}
+        return {key: float(val) for key, val in metrics.items()}
 
     @partial(jax.jit, static_argnames='self')
     def _train_step(self, train_states, target_qf_params, rng, batch):
@@ -156,8 +156,8 @@ class ConservativeSAC(object):
                     self.qf.apply(target_qf_params['qf2'], next_observations, new_next_actions),
                 )
                 max_target_indices = jnp.expand_dims(jnp.argmax(target_q_values, axis=-1), axis=-1)
-                target_q_values = jnp.take_along_axis(target_q_values, max_target_indices, axis=-1)
-                next_log_pi = jnp.take_along_axis(next_log_pi, max_target_indices, axis=-1)
+                target_q_values = jnp.take_along_axis(target_q_values, max_target_indices, axis=-1).squeeze(-1)
+                next_log_pi = jnp.take_along_axis(next_log_pi, max_target_indices, axis=-1).squeeze(-1)
             else:
                 new_next_actions, next_log_pi = self.policy.apply(
                     train_params['policy'], split_rng, next_observations
@@ -243,8 +243,8 @@ class ConservativeSAC(object):
                         jnp.exp(self.log_alpha_prime.apply(train_params['log_alpha_prime'])),
                         a_min=0.0, a_max=1000000.0
                     )
-                    cql_min_qf1_loss = alpha_prime * (cql_qf1_diff - self.config.cql_target_action_gap)
-                    cql_min_qf2_loss = alpha_prime * (cql_qf2_diff - self.config.cql_target_action_gap)
+                    cql_min_qf1_loss = alpha_prime * self.config.cql_min_q_weight * (cql_qf1_diff - self.config.cql_target_action_gap)
+                    cql_min_qf2_loss = alpha_prime * self.config.cql_min_q_weight * (cql_qf2_diff - self.config.cql_target_action_gap)
 
                     alpha_prime_loss = (-cql_min_qf1_loss - cql_min_qf2_loss)*0.5
 
