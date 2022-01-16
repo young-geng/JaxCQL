@@ -35,6 +35,7 @@ FLAGS_DEF = define_flags_with_default(
 
     reward_scale=1.0,
     reward_bias=0.0,
+    clip_action=0.999,
 
     policy_arch='256-256',
     qf_arch='256-256',
@@ -69,6 +70,7 @@ def main(argv):
     eval_sampler = TrajSampler(gym.make(FLAGS.env).unwrapped, FLAGS.max_traj_length)
     dataset = get_d4rl_dataset(eval_sampler.env)
     dataset['rewards'] = dataset['rewards'] * FLAGS.reward_scale + FLAGS.reward_bias
+    dataset['actions'] = np.clip(dataset['actions'], -FLAGS.clip_action, FLAGS.clip_action)
 
     observation_dim = eval_sampler.env.observation_space.shape[0]
     action_dim = eval_sampler.env.action_space.shape[0]

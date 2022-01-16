@@ -93,7 +93,7 @@ class TanhGaussianPolicy(nn.Module):
             distrax.MultivariateNormalDiag(mean, jnp.exp(log_std)),
             distrax.Block(distrax.Tanh(), ndims=1)
         )
-        return jnp.sum(action_distribution.log_prob(actions), axis=-1)
+        return action_distribution.log_prob(actions)
 
     def __call__(self, rng, observations, deterministic=False, repeat=None):
         if repeat is not None:
