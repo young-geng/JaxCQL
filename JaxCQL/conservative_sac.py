@@ -40,6 +40,8 @@ class ConservativeSAC(object):
         config.cql_temp = 1.0
         config.cql_min_q_weight = 5.0
         config.cql_max_target_backup = False
+        config.cql_clip_diff_min = -np.inf
+        config.cql_clip_diff_max = np.inf
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -235,8 +237,16 @@ class ConservativeSAC(object):
                 )
 
                 """Subtract the log likelihood of data"""
-                cql_qf1_diff = (cql_qf1_ood - q1_pred).mean()
-                cql_qf2_diff = (cql_qf2_ood - q2_pred).mean()
+                cql_qf1_diff = jnp.clip(
+                    cql_qf1_ood - q1_pred,
+                    self.config.cql_clip_diff_min,
+                    self.config.cql_clip_diff_max,
+                ).mean()
+                cql_qf2_diff = jnp.clip(
+                    cql_qf2_ood - q2_pred,
+                    self.config.cql_clip_diff_min,
+                    self.config.cql_clip_diff_max,
+                ).mean()
 
                 if self.config.cql_lagrange:
                     alpha_prime = jnp.clip(
