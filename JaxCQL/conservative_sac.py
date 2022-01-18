@@ -105,15 +105,15 @@ class ConservativeSAC(object):
         self._model_keys = tuple(model_keys)
         self._total_steps = 0
 
-    def train(self, batch):
+    def train(self, batch, bc=False):
         self._total_steps += 1
         self._train_states, self._target_qf_params, metrics = self._train_step(
-            self._train_states, self._target_qf_params, next_rng(), batch
+            self._train_states, self._target_qf_params, next_rng(), batch, bc
         )
         return {key: float(val) for key, val in metrics.items()}
 
-    @partial(jax.jit, static_argnames='self')
-    def _train_step(self, train_states, target_qf_params, rng, batch):
+    @partial(jax.jit, static_argnames=('self', 'bc'))
+    def _train_step(self, train_states, target_qf_params, rng, batch, bc=False):
 
         def loss_fn(train_params, rng):
             observations = batch['observations']
@@ -136,11 +136,15 @@ class ConservativeSAC(object):
                 alpha = self.config.alpha_multiplier
 
             """ Policy loss """
-            q_new_actions = jnp.minimum(
-                self.qf.apply(train_params['qf1'], observations, new_actions),
-                self.qf.apply(train_params['qf2'], observations, new_actions),
-            )
-            policy_loss = (alpha*log_pi - q_new_actions).mean()
+            if bc:
+                log_probs = self.policy.apply(train_params['policy'], observations, actions, method=self.policy.log_prob)
+                policy_loss = (alpha*log_pi - log_probs).mean()
+            else:
+                q_new_actions = jnp.minimum(
+                    self.qf.apply(train_params['qf1'], observations, new_actions),
+                    self.qf.apply(train_params['qf2'], observations, new_actions),
+                )
+                policy_loss = (alpha*log_pi - q_new_actions).mean()
 
             loss_collection['policy'] = policy_loss
 
@@ -172,11 +176,11 @@ class ConservativeSAC(object):
             if self.config.backup_entropy:
                 target_q_values = target_q_values - alpha * next_log_pi
 
-            q_target = jax.lax.stop_gradient(
+            td_target = jax.lax.stop_gradient(
                 rewards + (1. - dones) * self.config.discount * target_q_values
             )
-            qf1_loss = mse_loss(q1_pred, q_target)
-            qf2_loss = mse_loss(q2_pred, q_target)
+            qf1_loss = mse_loss(q1_pred, td_target)
+            qf2_loss = mse_loss(q2_pred, td_target)
 
             ### CQL
             if self.config.use_cql:

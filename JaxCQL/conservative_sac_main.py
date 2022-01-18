@@ -43,6 +43,7 @@ FLAGS_DEF = define_flags_with_default(
     policy_log_std_offset=-1.0,
 
     n_epochs=2000,
+    bc_epochs=0,
     n_train_step_per_epoch=1000,
     eval_period=10,
     eval_n_trajs=5,
@@ -94,7 +95,7 @@ def main(argv):
         with Timer() as train_timer:
             for batch_idx in range(FLAGS.n_train_step_per_epoch):
                 batch = batch_to_jax(subsample_batch(dataset, FLAGS.batch_size))
-                metrics.update(prefix_metrics(sac.train(batch), 'sac'))
+                metrics.update(prefix_metrics(sac.train(batch, bc=epoch < FLAGS.bc_epochs), 'sac'))
 
         with Timer() as eval_timer:
             if epoch == 0 or (epoch + 1) % FLAGS.eval_period == 0:
