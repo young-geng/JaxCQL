@@ -46,27 +46,44 @@ class Scalar(nn.Module):
 class FullyConnectedNetwork(nn.Module):
     output_dim: int
     arch: str = '256-256'
+    orthogonal_init: bool = False
 
     @nn.compact
     def __call__(self, input_tensor):
         x = input_tensor
         hidden_sizes = [int(h) for h in self.arch.split('-')]
         for h in hidden_sizes:
-            x = nn.Dense(h)(x)
+            if self.orthogonal_init:
+                x = nn.Dense(
+                    h,
+                    kernel_init=jax.nn.initializers.orthogonal(jnp.sqrt(2.0)),
+                    bias_init=jax.nn.initializers.zeros
+                )(x)
+            else:
+                x = nn.Dense(h)(x)
             x = nn.relu(x)
-        return nn.Dense(self.output_dim)(x)
 
+        if self.orthogonal_init:
+            output = nn.Dense(
+                self.output_dim,
+                kernel_init=jax.nn.initializers.orthogonal(1e-2),
+                bias_init=jax.nn.initializers.zeros
+            )(x)
+        else:
+            output = nn.Dense(self.output_dim)(x)
+        return output
 
 class FullyConnectedQFunction(nn.Module):
     observation_dim: int
     action_dim: int
     arch: str = '256-256'
+    orthogonal_init: bool = False
 
     @nn.compact
     @multiple_action_q_function
     def __call__(self, observations, actions):
         x = jnp.concatenate([observations, actions], axis=-1)
-        x = FullyConnectedNetwork(output_dim=1, arch=self.arch)(x)
+        x = FullyConnectedNetwork(output_dim=1, arch=self.arch, orthogonal_init=self.orthogonal_init)(x)
         return jnp.squeeze(x, -1)
 
 
@@ -74,11 +91,14 @@ class TanhGaussianPolicy(nn.Module):
     observation_dim: int
     action_dim: int
     arch: str = '256-256'
+    orthogonal_init: bool = False
     log_std_multiplier: float = 1.0
     log_std_offset: float = -1.0
 
     def setup(self):
-        self.base_network = FullyConnectedNetwork(output_dim=2 * self.action_dim, arch=self.arch)
+        self.base_network = FullyConnectedNetwork(
+            output_dim=2 * self.action_dim, arch=self.arch, orthogonal_init=self.orthogonal_init
+        )
         self.log_std_multiplier_module = Scalar(self.log_std_multiplier)
         self.log_std_offset_module = Scalar(self.log_std_offset)
 
