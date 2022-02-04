@@ -70,7 +70,13 @@ class FullyConnectedNetwork(nn.Module):
                 bias_init=jax.nn.initializers.zeros
             )(x)
         else:
-            output = nn.Dense(self.output_dim)(x)
+            output = nn.Dense(
+                self.output_dim,
+                kernel_init=jax.nn.initializers.variance_scaling(
+                    1e-2, 'fan_in', 'uniform'
+                ),
+                bias_init=jax.nn.initializers.zeros
+            )(x)
         return output
 
 class FullyConnectedQFunction(nn.Module):
