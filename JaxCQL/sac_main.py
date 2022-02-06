@@ -34,6 +34,7 @@ FLAGS_DEF = define_flags_with_default(
 
     policy_arch='256-256',
     qf_arch='256-256',
+    orthogonal_init=False,
     policy_log_std_multiplier=1.0,
     policy_log_std_offset=-1.0,
 
@@ -73,10 +74,10 @@ def main(argv):
     action_dim = eval_sampler.env.action_space.shape[0]
 
     policy = TanhGaussianPolicy(
-        observation_dim, action_dim, FLAGS.policy_arch,
+        observation_dim, action_dim, FLAGS.policy_arch, FLAGS.orthogonal_init,
         FLAGS.policy_log_std_multiplier, FLAGS.policy_log_std_offset
     )
-    qf = FullyConnectedQFunction(observation_dim, action_dim, FLAGS.qf_arch)
+    qf = FullyConnectedQFunction(observation_dim, action_dim, FLAGS.qf_arch, FLAGS.orthogonal_init)
 
     if FLAGS.sac.target_entropy >= 0.0:
         FLAGS.sac.target_entropy = -np.prod(eval_sampler.env.action_space.shape).item()
