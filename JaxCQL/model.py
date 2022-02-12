@@ -156,7 +156,6 @@ class SamplerPolicy(object):
         return self.policy.apply(params, rng, observations, deterministic, repeat=None)
 
     def __call__(self, observations, deterministic=False):
-        observations = jax.device_put(observations)
         actions, _ = self.act(self.params, next_rng(), observations, deterministic=deterministic)
         assert jnp.all(jnp.isfinite(actions))
         return jax.device_get(actions)
