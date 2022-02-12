@@ -110,7 +110,7 @@ class ConservativeSAC(object):
         self._train_states, self._target_qf_params, metrics = self._train_step(
             self._train_states, self._target_qf_params, next_rng(), batch, bc
         )
-        return {key: float(val) for key, val in metrics.items()}
+        return metrics
 
     @partial(jax.jit, static_argnames=('self', 'bc'))
     def _train_step(self, train_states, target_qf_params, rng, batch, bc=False):
