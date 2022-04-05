@@ -1,6 +1,6 @@
 name: JaxCQL
 channels:
-    - https://conda.anaconda.org/conda-forge
+    - defaults
 dependencies:
     - python=3.8
     - pip
@@ -13,8 +13,9 @@ dependencies:
     - jupyter
     - mpi4py
     - patchelf
-    - jax
     - pip:
+        - -f https://storage.googleapis.com/jax-releases/jax_releases.html
+        - jax[cuda]
         - flax
         - optax
         - distrax
