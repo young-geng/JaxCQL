@@ -13,7 +13,10 @@ from flax.training.train_state import TrainState
 import optax
 import distrax
 
-from .jax_utils import next_rng, value_and_multi_grad, mse_loss
+from .jax_utils import (
+    next_rng, value_and_multi_grad, mse_loss, JaxRNG, wrap_function_with_rng,
+    collect_jax_metrics
+)
 from .model import Scalar, update_target_network
 
 
@@ -50,20 +53,31 @@ class SAC(object):
             'sgd': optax.sgd,
         }[self.config.optimizer_type]
 
-        policy_params = self.policy.init(next_rng(), next_rng(), jnp.zeros((10, self.observation_dim)))
+        policy_params = self.policy.init(
+            next_rng(self.policy.rng_keys()),
+            jnp.zeros((10, self.observation_dim))
+        )
         self._train_states['policy'] = TrainState.create(
             params=policy_params,
             tx=optimizer_class(self.config.policy_lr),
             apply_fn=None
         )
 
-        qf1_params = self.qf.init(next_rng(), jnp.zeros((10, self.observation_dim)), jnp.zeros((10, self.action_dim)))
+        qf1_params = self.qf.init(
+            next_rng(self.qf.rng_keys()),
+            jnp.zeros((10, self.observation_dim)),
+            jnp.zeros((10, self.action_dim))
+        )
         self._train_states['qf1'] = TrainState.create(
             params=qf1_params,
             tx=optimizer_class(self.config.qf_lr),
             apply_fn=None,
         )
-        qf2_params = self.qf.init(next_rng(), jnp.zeros((10, self.observation_dim)), jnp.zeros((10, self.action_dim)))
+        qf2_params = self.qf.init(
+            next_rng(self.qf.rng_keys()),
+            jnp.zeros((10, self.observation_dim)),
+            jnp.zeros((10, self.action_dim))
+        )
         self._train_states['qf2'] = TrainState.create(
             params=qf2_params,
             tx=optimizer_class(self.config.qf_lr),
@@ -94,6 +108,8 @@ class SAC(object):
 
     @partial(jax.jit, static_argnames='self')
     def _train_step(self, train_states, target_qf_params, rng, batch):
+        rng_generator = JaxRNG(rng)
+
         def loss_fn(train_params, rng):
             observations = batch['observations']
             actions = batch['actions']
@@ -103,8 +119,21 @@ class SAC(object):
 
             loss_collection = {}
 
-            rng, split_rng = jax.random.split(rng)
-            new_actions, log_pi = self.policy.apply(train_params['policy'], split_rng, observations)
+            @wrap_function_with_rng(rng_generator())
+            def forward_policy(rng, *args, **kwargs):
+                return self.policy.apply(
+                    *args, **kwargs,
+                    rngs=JaxRNG(rng)(self.policy.rng_keys())
+                )
+
+            @wrap_function_with_rng(rng_generator())
+            def forward_qf(rng, *args, **kwargs):
+                return self.qf.apply(
+                    *args, **kwargs,
+                    rngs=JaxRNG(rng)(self.qf.rng_keys())
+                )
+
+            new_actions, log_pi = forward_policy(train_params['policy'], observations)
 
             if self.config.use_automatic_entropy_tuning:
                 alpha_loss = -self.log_alpha.apply(train_params['log_alpha']) * (log_pi + self.config.target_entropy).mean()
@@ -116,24 +145,21 @@ class SAC(object):
 
             """ Policy loss """
             q_new_actions = jnp.minimum(
-                self.qf.apply(train_params['qf1'], observations, new_actions),
-                self.qf.apply(train_params['qf2'], observations, new_actions),
+                forward_qf(train_params['qf1'], observations, new_actions),
+                forward_qf(train_params['qf2'], observations, new_actions),
             )
             policy_loss = (alpha*log_pi - q_new_actions).mean()
 
             loss_collection['policy'] = policy_loss
 
             """ Q function loss """
-            q1_pred = self.qf.apply(train_params['qf1'], observations, actions)
-            q2_pred = self.qf.apply(train_params['qf2'], observations, actions)
+            q1_pred = forward_qf(train_params['qf1'], observations, actions)
+            q2_pred = forward_qf(train_params['qf2'], observations, actions)
 
-            rng, split_rng = jax.random.split(rng)
-            new_next_actions, next_log_pi = self.policy.apply(
-                train_params['policy'], split_rng, next_observations
-            )
+            new_next_actions, next_log_pi = forward_policy(train_params['policy'], next_observations)
             target_q_values = jnp.minimum(
-                self.qf.apply(target_qf_params['qf1'], next_observations, new_next_actions),
-                self.qf.apply(target_qf_params['qf2'], next_observations, new_next_actions),
+                forward_qf(target_qf_params['qf1'], next_observations, new_next_actions),
+                forward_qf(target_qf_params['qf2'], next_observations, new_next_actions),
             )
 
             if self.config.backup_entropy:
@@ -167,16 +193,10 @@ class SAC(object):
             self.config.soft_target_update_rate
         )
 
-        metrics = dict(
-            log_pi=aux_values['log_pi'].mean(),
-            policy_loss=aux_values['policy_loss'],
-            qf1_loss=aux_values['qf1_loss'],
-            qf2_loss=aux_values['qf2_loss'],
-            alpha_loss=aux_values['alpha_loss'],
-            alpha=aux_values['alpha'],
-            average_qf1=aux_values['q1_pred'].mean(),
-            average_qf2=aux_values['q2_pred'].mean(),
-            average_target_q=aux_values['target_q_values'].mean(),
+        metrics = collect_jax_metrics(
+            aux_values,
+            ['log_pi', 'policy_loss', 'qf1_loss', 'qf2_loss', 'alpha_loss',
+             'alpha', 'q1_pred', 'q2_pred', 'target_q_values']
         )
         return new_train_states, new_target_qf_params, metrics
 

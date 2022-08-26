@@ -13,7 +13,10 @@ from flax.training.train_state import TrainState
 import optax
 import distrax
 
-from .jax_utils import next_rng, value_and_multi_grad, mse_loss
+from .jax_utils import (
+    next_rng, value_and_multi_grad, mse_loss, JaxRNG, wrap_function_with_rng,
+    collect_jax_metrics
+)
 from .model import Scalar, update_target_network
 from .utils import prefix_metrics
 
@@ -61,20 +64,31 @@ class ConservativeSAC(object):
             'sgd': optax.sgd,
         }[self.config.optimizer_type]
 
-        policy_params = self.policy.init(next_rng(), next_rng(), jnp.zeros((10, self.observation_dim)))
+        policy_params = self.policy.init(
+            next_rng(self.policy.rng_keys()),
+            jnp.zeros((10, self.observation_dim))
+        )
         self._train_states['policy'] = TrainState.create(
             params=policy_params,
             tx=optimizer_class(self.config.policy_lr),
             apply_fn=None
         )
 
-        qf1_params = self.qf.init(next_rng(), jnp.zeros((10, self.observation_dim)), jnp.zeros((10, self.action_dim)))
+        qf1_params = self.qf.init(
+            next_rng(self.qf.rng_keys()),
+            jnp.zeros((10, self.observation_dim)),
+            jnp.zeros((10, self.action_dim))
+        )
         self._train_states['qf1'] = TrainState.create(
             params=qf1_params,
             tx=optimizer_class(self.config.qf_lr),
             apply_fn=None,
         )
-        qf2_params = self.qf.init(next_rng(), jnp.zeros((10, self.observation_dim)), jnp.zeros((10, self.action_dim)))
+        qf2_params = self.qf.init(
+            next_rng(self.qf.rng_keys()),
+            jnp.zeros((10, self.observation_dim)),
+            jnp.zeros((10, self.action_dim))
+        )
         self._train_states['qf2'] = TrainState.create(
             params=qf2_params,
             tx=optimizer_class(self.config.qf_lr),
@@ -114,8 +128,9 @@ class ConservativeSAC(object):
 
     @partial(jax.jit, static_argnames=('self', 'bc'))
     def _train_step(self, train_states, target_qf_params, rng, batch, bc=False):
+        rng_generator = JaxRNG(rng)
 
-        def loss_fn(train_params, rng):
+        def loss_fn(train_params):
             observations = batch['observations']
             actions = batch['actions']
             rewards = batch['rewards']
@@ -124,8 +139,21 @@ class ConservativeSAC(object):
 
             loss_collection = {}
 
-            rng, split_rng = jax.random.split(rng)
-            new_actions, log_pi = self.policy.apply(train_params['policy'], split_rng, observations)
+            @wrap_function_with_rng(rng_generator())
+            def forward_policy(rng, *args, **kwargs):
+                return self.policy.apply(
+                    *args, **kwargs,
+                    rngs=JaxRNG(rng)(self.policy.rng_keys())
+                )
+
+            @wrap_function_with_rng(rng_generator())
+            def forward_qf(rng, *args, **kwargs):
+                return self.qf.apply(
+                    *args, **kwargs,
+                    rngs=JaxRNG(rng)(self.qf.rng_keys())
+                )
+
+            new_actions, log_pi = forward_policy(train_params['policy'], observations)
 
             if self.config.use_automatic_entropy_tuning:
                 alpha_loss = -self.log_alpha.apply(train_params['log_alpha']) * (log_pi + self.config.target_entropy).mean()
@@ -137,40 +165,39 @@ class ConservativeSAC(object):
 
             """ Policy loss """
             if bc:
-                log_probs = self.policy.apply(train_params['policy'], observations, actions, method=self.policy.log_prob)
+                log_probs = forward_policy(train_params['policy'], observations, actions, method=self.policy.log_prob)
                 policy_loss = (alpha*log_pi - log_probs).mean()
             else:
                 q_new_actions = jnp.minimum(
-                    self.qf.apply(train_params['qf1'], observations, new_actions),
-                    self.qf.apply(train_params['qf2'], observations, new_actions),
+                    forward_qf(train_params['qf1'], observations, new_actions),
+                    forward_qf(train_params['qf2'], observations, new_actions),
                 )
                 policy_loss = (alpha*log_pi - q_new_actions).mean()
 
             loss_collection['policy'] = policy_loss
 
             """ Q function loss """
-            q1_pred = self.qf.apply(train_params['qf1'], observations, actions)
-            q2_pred = self.qf.apply(train_params['qf2'], observations, actions)
+            q1_pred = forward_qf(train_params['qf1'], observations, actions)
+            q2_pred = forward_qf(train_params['qf2'], observations, actions)
 
-            rng, split_rng = jax.random.split(rng)
             if self.config.cql_max_target_backup:
-                new_next_actions, next_log_pi = self.policy.apply(
-                    train_params['policy'], split_rng, next_observations, repeat=self.config.cql_n_actions
+                new_next_actions, next_log_pi = forward_policy(
+                    train_params['policy'], next_observations, repeat=self.config.cql_n_actions
                 )
                 target_q_values = jnp.minimum(
-                    self.qf.apply(target_qf_params['qf1'], next_observations, new_next_actions),
-                    self.qf.apply(target_qf_params['qf2'], next_observations, new_next_actions),
+                    forward_qf(target_qf_params['qf1'], next_observations, new_next_actions),
+                    forward_qf(target_qf_params['qf2'], next_observations, new_next_actions),
                 )
                 max_target_indices = jnp.expand_dims(jnp.argmax(target_q_values, axis=-1), axis=-1)
                 target_q_values = jnp.take_along_axis(target_q_values, max_target_indices, axis=-1).squeeze(-1)
                 next_log_pi = jnp.take_along_axis(next_log_pi, max_target_indices, axis=-1).squeeze(-1)
             else:
-                new_next_actions, next_log_pi = self.policy.apply(
-                    train_params['policy'], split_rng, next_observations
+                new_next_actions, next_log_pi = forward_policy(
+                    train_params['policy'], next_observations
                 )
                 target_q_values = jnp.minimum(
-                    self.qf.apply(target_qf_params['qf1'], next_observations, new_next_actions),
-                    self.qf.apply(target_qf_params['qf2'], next_observations, new_next_actions),
+                    forward_qf(target_qf_params['qf1'], next_observations, new_next_actions),
+                    forward_qf(target_qf_params['qf2'], next_observations, new_next_actions),
                 )
 
             if self.config.backup_entropy:
@@ -185,27 +212,24 @@ class ConservativeSAC(object):
             ### CQL
             if self.config.use_cql:
                 batch_size = actions.shape[0]
-                rng, split_rng = jax.random.split(rng)
                 cql_random_actions = jax.random.uniform(
-                    split_rng, shape=(batch_size, self.config.cql_n_actions, self.action_dim),
+                    rng_generator(), shape=(batch_size, self.config.cql_n_actions, self.action_dim),
                     minval=-1.0, maxval=1.0
                 )
 
-                rng, split_rng = jax.random.split(rng)
-                cql_current_actions, cql_current_log_pis = self.policy.apply(
-                    train_params['policy'], split_rng, observations, repeat=self.config.cql_n_actions
+                cql_current_actions, cql_current_log_pis = forward_policy(
+                    train_params['policy'], observations, repeat=self.config.cql_n_actions,
                 )
-                rng, split_rng = jax.random.split(rng)
-                cql_next_actions, cql_next_log_pis = self.policy.apply(
-                    train_params['policy'], split_rng, next_observations, repeat=self.config.cql_n_actions
+                cql_next_actions, cql_next_log_pis = forward_policy(
+                    train_params['policy'], next_observations, repeat=self.config.cql_n_actions,
                 )
 
-                cql_q1_rand = self.qf.apply(train_params['qf1'], observations, cql_random_actions)
-                cql_q2_rand = self.qf.apply(train_params['qf2'], observations, cql_random_actions)
-                cql_q1_current_actions = self.qf.apply(train_params['qf1'], observations, cql_current_actions)
-                cql_q2_current_actions = self.qf.apply(train_params['qf2'], observations, cql_current_actions)
-                cql_q1_next_actions = self.qf.apply(train_params['qf1'], observations, cql_next_actions)
-                cql_q2_next_actions = self.qf.apply(train_params['qf2'], observations, cql_next_actions)
+                cql_q1_rand = forward_qf(train_params['qf1'], observations, cql_random_actions)
+                cql_q2_rand = forward_qf(train_params['qf2'], observations, cql_random_actions)
+                cql_q1_current_actions = forward_qf(train_params['qf1'], observations, cql_current_actions)
+                cql_q2_current_actions = forward_qf(train_params['qf2'], observations, cql_current_actions)
+                cql_q1_next_actions = forward_qf(train_params['qf1'], observations, cql_next_actions)
+                cql_q2_next_actions = forward_qf(train_params['qf2'], observations, cql_next_actions)
 
                 cql_cat_q1 = jnp.concatenate(
                     [cql_q1_rand, jnp.expand_dims(q1_pred, 1), cql_q1_next_actions, cql_q1_current_actions], axis=1
@@ -278,7 +302,7 @@ class ConservativeSAC(object):
             return tuple(loss_collection[key] for key in self.model_keys), locals()
 
         train_params = {key: train_states[key].params for key in self.model_keys}
-        (_, aux_values), grads = value_and_multi_grad(loss_fn, len(self.model_keys), has_aux=True)(train_params, rng)
+        (_, aux_values), grads = value_and_multi_grad(loss_fn, len(self.model_keys), has_aux=True)(train_params)
 
         new_train_states = {
             key: train_states[key].apply_gradients(grads=grads[i][key])
@@ -294,35 +318,22 @@ class ConservativeSAC(object):
             self.config.soft_target_update_rate
         )
 
-        metrics = dict(
-            log_pi=aux_values['log_pi'].mean(),
-            policy_loss=aux_values['policy_loss'],
-            qf1_loss=aux_values['qf1_loss'],
-            qf2_loss=aux_values['qf2_loss'],
-            alpha_loss=aux_values['alpha_loss'],
-            alpha=aux_values['alpha'],
-            average_qf1=aux_values['q1_pred'].mean(),
-            average_qf2=aux_values['q2_pred'].mean(),
-            average_target_q=aux_values['target_q_values'].mean(),
+        metrics = collect_jax_metrics(
+            aux_values,
+            ['log_pi', 'policy_loss', 'qf1_loss', 'qf2_loss', 'alpha_loss',
+             'alpha', 'q1_pred', 'q2_pred', 'target_q_values']
         )
 
         if self.config.use_cql:
-            metrics.update(prefix_metrics(dict(
-                cql_std_q1=aux_values['cql_std_q1'].mean(),
-                cql_std_q2=aux_values['cql_std_q2'].mean(),
-                cql_q1_rand=aux_values['cql_q1_rand'].mean(),
-                cql_q2_rand=aux_values['cql_q2_rand'].mean(),
-                cql_qf1_diff=aux_values['cql_qf1_diff'].mean(),
-                cql_qf2_diff=aux_values['cql_qf2_diff'].mean(),
-                cql_min_qf1_loss=aux_values['cql_min_qf1_loss'].mean(),
-                cql_min_qf2_loss=aux_values['cql_min_qf2_loss'].mean(),
-                cql_q1_current_actions=aux_values['cql_q1_current_actions'].mean(),
-                cql_q2_current_actions=aux_values['cql_q2_current_actions'].mean(),
-                cql_q1_next_actions=aux_values['cql_q1_next_actions'].mean(),
-                cql_q2_next_actions=aux_values['cql_q2_next_actions'].mean(),
-                alpha_prime=aux_values['alpha_prime'],
-                alpha_prime_loss=aux_values['alpha_prime_loss'],
-            ), 'cql'))
+            metrics.update(collect_jax_metrics(
+                aux_values,
+                ['cql_std_q1', 'cql_std_q2', 'cql_q1_rand', 'cql_q2_rand'
+                 'cql_qf1_diff', 'cql_qf2_diff', 'cql_min_qf1_loss',
+                 'cql_min_qf2_loss', 'cql_q1_current_actions', 'cql_q2_current_actions'
+                 'cql_q1_next_actions', 'cql_q2_next_actions', 'alpha_prime',
+                 'alpha_prime_loss'],
+                'cql'
+            ))
 
         return new_train_states, new_target_qf_params, metrics
 

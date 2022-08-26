@@ -20,8 +20,10 @@ from .replay_buffer import ReplayBuffer
 from .jax_utils import batch_to_jax
 from .model import TanhGaussianPolicy, FullyConnectedQFunction, SamplerPolicy
 from .sampler import StepSampler, TrajSampler
-from .utils import Timer, define_flags_with_default, set_random_seed, print_flags, get_user_flags, prefix_metrics
-from .utils import WandBLogger
+from .utils import (
+    Timer, define_flags_with_default, set_random_seed, print_flags,
+    get_user_flags, prefix_metrics, WandBLogger
+)
 from viskit.logging import logger, setup_logger
 
 

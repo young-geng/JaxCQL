@@ -7,11 +7,11 @@ import flax
 from flax import linen as nn
 import distrax
 
-from .jax_utils import extend_and_repeat, next_rng
+from .jax_utils import extend_and_repeat, next_rng, JaxRNG
 
 
 def update_target_network(main_params, target_params, tau):
-    return jax.tree_multimap(
+    return jax.tree_util.tree_map(
         lambda x, y: tau * x + (1.0 - tau) * y,
         main_params, target_params
     )
@@ -92,6 +92,10 @@ class FullyConnectedQFunction(nn.Module):
         x = FullyConnectedNetwork(output_dim=1, arch=self.arch, orthogonal_init=self.orthogonal_init)(x)
         return jnp.squeeze(x, -1)
 
+    @nn.nowrap
+    def rng_keys(self):
+        return ('params', )
+
 
 class TanhGaussianPolicy(nn.Module):
     observation_dim: int
@@ -121,7 +125,7 @@ class TanhGaussianPolicy(nn.Module):
         )
         return action_distribution.log_prob(actions)
 
-    def __call__(self, rng, observations, deterministic=False, repeat=None):
+    def __call__(self, observations, deterministic=False, repeat=None):
         if repeat is not None:
             observations = extend_and_repeat(observations, 1, repeat)
         base_network_output = self.base_network(observations)
@@ -136,9 +140,13 @@ class TanhGaussianPolicy(nn.Module):
             samples = jnp.tanh(mean)
             log_prob = action_distribution.log_prob(samples)
         else:
-            samples, log_prob = action_distribution.sample_and_log_prob(seed=rng)
+            samples, log_prob = action_distribution.sample_and_log_prob(seed=self.make_rng('noise'))
 
         return samples, log_prob
+
+    @nn.nowrap
+    def rng_keys(self):
+        return ('params', 'noise')
 
 
 class SamplerPolicy(object):
@@ -153,7 +161,10 @@ class SamplerPolicy(object):
 
     @partial(jax.jit, static_argnames=('self', 'deterministic'))
     def act(self, params, rng, observations, deterministic):
-        return self.policy.apply(params, rng, observations, deterministic, repeat=None)
+        return self.policy.apply(
+            params, observations, deterministic, repeat=None,
+            rngs=JaxRNG(rng)(self.policy.rng_keys())
+        )
 
     def __call__(self, observations, deterministic=False):
         actions, _ = self.act(self.params, next_rng(), observations, deterministic=deterministic)
