@@ -62,10 +62,21 @@ python -m JaxCQL.conservative_sac_main \
 
 ## Results of Running JaxCQL on D4RL Environments
 In order to save your time and compute resources, I've done a sweep of JaxCQL on certain
-D4RL environments with various min Q weight values. [The results can be seen here](https://wandb.ai/ygx/JaxCQL--jax_cql_gym_sweep_1).
+D4RL environments with various min Q weight values. [The results can be seen here](https://wandb.ai/ygx/JaxCQL--jax_cql_gym_sweep_3).
 You can choose the environment to visualize by filtering on `env`. The results for each `cql.cql_min_q_weight` on each `env`
 is repeated and average across 3 random seeds.
 
+
+## Citing
+If you find this open source release useful, please reference in your paper:
+```
+@article{geng2022jaxcql,
+  title={JaxCQL: a simple implementation of SAC and CQL in JAX},
+  author={Xinyang Geng},
+  year={2022},
+  url={https://github.com/young-geng/JaxCQL}
+}
+```
 
 ## Credits
 The project organization is inspired by [TD3](https://github.com/sfujim/TD3).
