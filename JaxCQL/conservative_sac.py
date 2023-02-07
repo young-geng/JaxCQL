@@ -15,10 +15,9 @@ import distrax
 
 from .jax_utils import (
     next_rng, value_and_multi_grad, mse_loss, JaxRNG, wrap_function_with_rng,
-    collect_jax_metrics
+    collect_metrics
 )
 from .model import Scalar, update_target_network
-from .utils import prefix_metrics
 
 
 class ConservativeSAC(object):
@@ -318,14 +317,14 @@ class ConservativeSAC(object):
             self.config.soft_target_update_rate
         )
 
-        metrics = collect_jax_metrics(
+        metrics = collect_metrics(
             aux_values,
             ['log_pi', 'policy_loss', 'qf1_loss', 'qf2_loss', 'alpha_loss',
              'alpha', 'q1_pred', 'q2_pred', 'target_q_values']
         )
 
         if self.config.use_cql:
-            metrics.update(collect_jax_metrics(
+            metrics.update(collect_metrics(
                 aux_values,
                 ['cql_std_q1', 'cql_std_q2', 'cql_q1_rand', 'cql_q2_rand'
                  'cql_qf1_diff', 'cql_qf2_diff', 'cql_min_qf1_loss',

@@ -15,7 +15,7 @@ import distrax
 
 from .jax_utils import (
     next_rng, value_and_multi_grad, mse_loss, JaxRNG, wrap_function_with_rng,
-    collect_jax_metrics
+    collect_metrics
 )
 from .model import Scalar, update_target_network
 
@@ -193,7 +193,7 @@ class SAC(object):
             self.config.soft_target_update_rate
         )
 
-        metrics = collect_jax_metrics(
+        metrics = collect_metrics(
             aux_values,
             ['log_pi', 'policy_loss', 'qf1_loss', 'qf2_loss', 'alpha_loss',
              'alpha', 'q1_pred', 'q2_pred', 'target_q_values']

@@ -5,6 +5,7 @@ import uuid
 
 import numpy as np
 import pprint
+import mlxu
 
 import gym
 
@@ -12,22 +13,15 @@ import jax
 import jax.numpy as jnp
 import flax
 
-import absl.app
-import absl.flags
-
 from .sac import SAC
 from .replay_buffer import ReplayBuffer
 from .jax_utils import batch_to_jax
 from .model import TanhGaussianPolicy, FullyConnectedQFunction, SamplerPolicy
 from .sampler import StepSampler, TrajSampler
-from .utils import (
-    Timer, define_flags_with_default, set_random_seed, print_flags,
-    get_user_flags, prefix_metrics, WandBLogger
-)
 from viskit.logging import logger, setup_logger
 
 
-FLAGS_DEF = define_flags_with_default(
+FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     env='HalfCheetah-v2',
     max_traj_length=1000,
     replay_buffer_size=1000000,
@@ -49,15 +43,14 @@ FLAGS_DEF = define_flags_with_default(
     batch_size=256,
 
     sac=SAC.get_default_config(),
-    logging=WandBLogger.get_default_config(),
+    logging=mlxu.WandBLogger.get_default_config(),
 )
 
 
 def main(argv):
-    FLAGS = absl.flags.FLAGS
-
-    variant = get_user_flags(FLAGS, FLAGS_DEF)
-    wandb_logger = WandBLogger(config=FLAGS.logging, variant=variant)
+    variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
+    variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
+    wandb_logger = mlxu.WandBLogger(config=FLAGS.logging, variant=variant)
     setup_logger(
         variant=variant,
         exp_id=wandb_logger.experiment_id,
@@ -66,7 +59,7 @@ def main(argv):
         include_exp_prefix_sub_dir=False
     )
 
-    set_random_seed(FLAGS.seed)
+    mlxu.jax_utils.set_random_seed(FLAGS.seed)
 
     train_sampler = StepSampler(gym.make(FLAGS.env).unwrapped, FLAGS.max_traj_length)
     eval_sampler = TrajSampler(gym.make(FLAGS.env).unwrapped, FLAGS.max_traj_length)
@@ -90,7 +83,7 @@ def main(argv):
     viskit_metrics = {}
     for epoch in range(FLAGS.n_epochs):
         metrics = {}
-        with Timer() as rollout_timer:
+        with mlxu.Timer() as rollout_timer:
             train_sampler.sample(
                 sampler_policy.update_params(sac.train_params['policy']),
                 FLAGS.n_env_steps_per_epoch, deterministic=False, replay_buffer=replay_buffer
@@ -98,12 +91,12 @@ def main(argv):
             metrics['env_steps'] = replay_buffer.total_steps
             metrics['epoch'] = epoch
 
-        with Timer() as train_timer:
+        with mlxu.Timer() as train_timer:
             for batch_idx in range(FLAGS.n_train_step_per_epoch):
                 batch = batch_to_jax(replay_buffer.sample(FLAGS.batch_size))
-                metrics.update(prefix_metrics(sac.train(batch), 'sac'))
+                metrics.update(mlxu.prefix_metrics(sac.train(batch), 'sac'))
 
-        with Timer() as eval_timer:
+        with mlxu.Timer() as eval_timer:
             if epoch == 0 or (epoch + 1) % FLAGS.eval_period == 0:
                 trajs = eval_sampler.sample(
                     sampler_policy.update_params(sac.train_params['policy']),
@@ -132,4 +125,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-    absl.app.run(main)
+    mlxu.run(main)

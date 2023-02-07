@@ -29,3 +29,4 @@ dependencies:
         - git+https://github.com/Farama-Foundation/D4RL.git
         - wandb
         - ml_collections
+        - mlxu>=0.1.5

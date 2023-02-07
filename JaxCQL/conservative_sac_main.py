@@ -5,6 +5,7 @@ import uuid
 
 import numpy as np
 import pprint
+import mlxu
 
 import jax
 import jax.numpy as jnp
@@ -13,22 +14,15 @@ import flax
 import gym
 import d4rl
 
-import absl.app
-import absl.flags
-
 from .conservative_sac import ConservativeSAC
 from .replay_buffer import get_d4rl_dataset, subsample_batch
 from .jax_utils import batch_to_jax
 from .model import TanhGaussianPolicy, FullyConnectedQFunction, SamplerPolicy
 from .sampler import StepSampler, TrajSampler
-from .utils import (
-    Timer, define_flags_with_default, set_random_seed, print_flags,
-    get_user_flags, prefix_metrics, WandBLogger
-)
 from viskit.logging import logger, setup_logger
 
 
-FLAGS_DEF = define_flags_with_default(
+FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     env='halfcheetah-medium-v2',
     max_traj_length=1000,
     seed=42,
@@ -52,15 +46,13 @@ FLAGS_DEF = define_flags_with_default(
     eval_n_trajs=5,
 
     cql=ConservativeSAC.get_default_config(),
-    logging=WandBLogger.get_default_config(),
+    logging=mlxu.WandBLogger.get_default_config(),
 )
 
 
 def main(argv):
-    FLAGS = absl.flags.FLAGS
-
-    variant = get_user_flags(FLAGS, FLAGS_DEF)
-    wandb_logger = WandBLogger(config=FLAGS.logging, variant=variant)
+    variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
+    wandb_logger = mlxu.WandBLogger(config=FLAGS.logging, variant=variant)
     setup_logger(
         variant=variant,
         exp_id=wandb_logger.experiment_id,
@@ -69,7 +61,7 @@ def main(argv):
         include_exp_prefix_sub_dir=False
     )
 
-    set_random_seed(FLAGS.seed)
+    mlxu.jax_utils.set_random_seed(FLAGS.seed)
 
     eval_sampler = TrajSampler(gym.make(FLAGS.env).unwrapped, FLAGS.max_traj_length)
     dataset = get_d4rl_dataset(eval_sampler.env)
@@ -95,12 +87,12 @@ def main(argv):
     for epoch in range(FLAGS.n_epochs):
         metrics = {'epoch': epoch}
 
-        with Timer() as train_timer:
+        with mlxu.Timer() as train_timer:
             for batch_idx in range(FLAGS.n_train_step_per_epoch):
                 batch = batch_to_jax(subsample_batch(dataset, FLAGS.batch_size))
-                metrics.update(prefix_metrics(sac.train(batch, bc=epoch < FLAGS.bc_epochs), 'sac'))
+                metrics.update(mlxu.prefix_metrics(sac.train(batch, bc=epoch < FLAGS.bc_epochs), 'sac'))
 
-        with Timer() as eval_timer:
+        with mlxu.Timer() as eval_timer:
             if epoch == 0 or (epoch + 1) % FLAGS.eval_period == 0:
                 trajs = eval_sampler.sample(
                     sampler_policy.update_params(sac.train_params['policy']),
@@ -129,4 +121,4 @@ def main(argv):
         wandb_logger.save_pickle(save_data, 'model.pkl')
 
 if __name__ == '__main__':
-    absl.app.run(main)
+    mlxu.run(main)
